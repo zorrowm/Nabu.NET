@@ -102,6 +102,10 @@ app.MapPost("/orders", (CreateOrder order) =&gt; ...)
         <a href="attributes-and-tools.html#one-action-several-tools">several tools over one endpoint</a>.</li>
       <li>An attribute on the handler itself is equivalent to the extension:
         <code>app.MapGet("/ping", [McpTool("ping")] () =&gt; ...)</code>.</li>
+      <li><code>.McpToolOutput(output =&gt; { ... })</code> (or <code>[McpToolOutput]</code> on the
+        handler) <a href="attributes-and-tools.html#shaping-tool-output">shapes what the endpoint's
+        tools return</a> — field include/exclude paths and output converters, scoped per tool with its
+        <code>Tool</code> property.</li>
       <li><code>.McpIgnore()</code> (or <code>[McpIgnore]</code> on the handler) keeps an endpoint out of
         discovery, which matters when <code>ExposeAllActions</code> is on — that option publishes every
         delegate route handler just as it publishes every controller action, and

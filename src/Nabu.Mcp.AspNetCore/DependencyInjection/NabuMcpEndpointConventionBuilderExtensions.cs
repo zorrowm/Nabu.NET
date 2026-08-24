@@ -85,6 +85,50 @@ namespace Nabu.Mcp.AspNetCore
         }
 
         /// <summary>
+        /// Shapes what the endpoint's tools return to the model, giving access to the full
+        /// <see cref="McpToolOutputAttribute"/> surface - field include/exclude paths and an output
+        /// converter. Scope an occurrence to one tool of a multi-<c>McpTool</c> endpoint with
+        /// <see cref="McpToolOutputAttribute.Tool"/>.
+        /// </summary>
+        /// <example>
+        /// <code>
+        /// app.MapGet("/customers/{id}", (int id) => ...)
+        ///    .McpTool("customers_get")
+        ///    .McpToolOutput(output => output.ExcludeFields = new[] { "ssn", "addresses.street" });
+        /// </code>
+        /// </example>
+        public static TBuilder McpToolOutput<TBuilder>(this TBuilder builder, Action<McpToolOutputAttribute> configure)
+            where TBuilder : IEndpointConventionBuilder
+        {
+            if (configure == null)
+            {
+                throw new ArgumentNullException(nameof(configure));
+            }
+
+            var output = new McpToolOutputAttribute();
+            configure(output);
+            return builder.McpToolOutput(output);
+        }
+
+        /// <summary>Shapes what the endpoint's tools return, as described by <paramref name="output"/>.</summary>
+        public static TBuilder McpToolOutput<TBuilder>(this TBuilder builder, McpToolOutputAttribute output)
+            where TBuilder : IEndpointConventionBuilder
+        {
+            if (builder == null)
+            {
+                throw new ArgumentNullException(nameof(builder));
+            }
+
+            if (output == null)
+            {
+                throw new ArgumentNullException(nameof(output));
+            }
+
+            builder.Add(endpoint => endpoint.Metadata.Add(output));
+            return builder;
+        }
+
+        /// <summary>
         /// Keeps the endpoint out of MCP discovery. Relevant with
         /// <see cref="NabuMcpOptions.ExposeAllActions"/>, which otherwise publishes every route handler.
         /// </summary>

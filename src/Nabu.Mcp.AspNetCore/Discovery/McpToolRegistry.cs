@@ -265,6 +265,10 @@ namespace Nabu.Mcp.AspNetCore.Discovery
             var controllerAttributes = controllerType.GetCustomAttributes<McpToolAttribute>(inherit: true).ToList();
             var controllerAttribute = controllerAttributes.Count > 0 ? controllerAttributes[0] : null;
 
+            var methodOutputs = method.GetCustomAttributes<McpToolOutputAttribute>(inherit: true).ToList();
+            var controllerOutputs = controllerType.GetCustomAttributes<McpToolOutputAttribute>(inherit: true).ToList();
+            var matchedOutputs = new HashSet<McpToolOutputAttribute>();
+
             // A controller-wide [McpTool] is a default for the actions that carry none of their own; an
             // action that declares its own variants replaces it rather than adding to it.
             var isMethodLevel = methodAttributes.Count > 0;
@@ -338,14 +342,24 @@ namespace Nabu.Mcp.AspNetCore.Discovery
                 var annotations = BuildAnnotations(attribute, methodAttribute, httpMethod, Humanize(action.ActionName));
                 var name = ResolveName(action, methodAttribute, httpMethod, routeTemplate, usedNames);
 
+                McpToolOutputDescriptor? output;
+                if (!McpToolOutputResolver.TrySelect(
+                        methodOutputs, controllerOutputs, name, methodAttribute?.Name, display, _logger, matchedOutputs, out output))
+                {
+                    continue;
+                }
+
                 results.Add(new McpToolDescriptor(name, httpMethod, routeTemplate, action, parameters, inputSchema, annotations)
                 {
                     Description = ResolveDescription(action, methodAttribute, controllerAttribute, httpMethod, routeTemplate),
                     ConstantRouteValues = new Dictionary<string, string?>(action.RouteValues, StringComparer.OrdinalIgnoreCase),
                     Constants = constants,
                     Authorization = ResolveAuthorization(action),
+                    Output = output,
                 });
             }
+
+            McpToolOutputResolver.WarnUnmatched(methodOutputs, matchedOutputs, display, _logger);
 
             return results;
         }

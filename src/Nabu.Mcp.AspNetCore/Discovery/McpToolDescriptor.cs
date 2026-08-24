@@ -229,6 +229,13 @@ namespace Nabu.Mcp.AspNetCore.Discovery
         /// </summary>
         public Type? InvokerType { get; set; }
 
+        /// <summary>
+        /// How the response body is shaped before it becomes tool content - field include/exclude
+        /// paths and an optional converter, populated from <see cref="McpToolOutputAttribute"/>.
+        /// <c>null</c> - the default - exposes the response as-is.
+        /// </summary>
+        public McpToolOutputDescriptor? Output { get; set; }
+
         public override string ToString() =>
             HttpMethod.Length == 0 ? Name : Name + " (" + HttpMethod + " /" + RouteTemplate + ")";
     }

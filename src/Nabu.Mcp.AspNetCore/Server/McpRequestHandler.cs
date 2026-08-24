@@ -477,7 +477,7 @@ namespace Nabu.Mcp.AspNetCore.Server
                 return ToolError("The tool failed to execute: " + ex.Message);
             }
 
-            return BuildToolResult(tool!, result);
+            return BuildToolResult(tool!, result, context);
         }
 
         /// <summary>
@@ -502,7 +502,7 @@ namespace Nabu.Mcp.AspNetCore.Server
             return invoker;
         }
 
-        internal JsonObject BuildToolResult(McpToolDescriptor tool, McpToolInvocationResult result)
+        internal JsonObject BuildToolResult(McpToolDescriptor tool, McpToolInvocationResult result, HttpContext context)
         {
             var isError = _options.TreatErrorStatusAsToolError && !result.IsSuccess;
 
@@ -510,6 +510,28 @@ namespace Nabu.Mcp.AspNetCore.Server
             var isHttp = tool.HttpMethod.Length != 0;
 
             var text = result.Body;
+
+            // Output shaping applies to the success payload only: error bodies are the framework's
+            // failure text, not the entity the filters describe. It fails closed - a body that cannot
+            // be shaped is suppressed rather than exposed, because the shaping may exist to hide data.
+            JsonNode? shaped = null;
+            var isShaped = false;
+            if (tool.Output != null && !isError && !string.IsNullOrEmpty(text))
+            {
+                string? failure;
+                if (!McpToolOutputShaper.TryShape(tool, result, context, _logger, out shaped, out failure))
+                {
+                    _logger.LogWarning(
+                        "Nabu MCP suppressed the result of tool {Tool}: {Reason}",
+                        tool.Name,
+                        failure);
+                    return ToolError("The result of tool '" + tool.Name + "' was suppressed because " + failure);
+                }
+
+                isShaped = true;
+                text = shaped == null ? string.Empty : shaped.ToJsonString();
+            }
+
             if (string.IsNullOrEmpty(text))
             {
                 if (isHttp)
@@ -544,7 +566,7 @@ namespace Nabu.Mcp.AspNetCore.Server
 
             if (_options.IncludeStructuredContent && !isError && !result.Truncated)
             {
-                var structured = TryParseStructured(result);
+                var structured = isShaped ? WrapStructured(shaped) : TryParseStructured(result);
                 if (structured != null)
                 {
                     payload["structuredContent"] = structured;
@@ -552,6 +574,17 @@ namespace Nabu.Mcp.AspNetCore.Server
             }
 
             return payload;
+        }
+
+        /// <summary>structuredContent must be an object; wrap shaped arrays and scalars.</summary>
+        private static JsonNode? WrapStructured(JsonNode? shaped)
+        {
+            if (shaped is JsonObject)
+            {
+                return shaped;
+            }
+
+            return shaped == null ? null : new JsonObject { ["result"] = shaped };
         }
 
         private static JsonNode? TryParseStructured(McpToolInvocationResult result)

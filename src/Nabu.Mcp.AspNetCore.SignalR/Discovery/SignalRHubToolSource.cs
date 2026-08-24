@@ -125,6 +125,7 @@ namespace Nabu.Mcp.AspNetCore.SignalR.Discovery
             }
 
             var classAttributes = hubType.GetCustomAttributes<McpToolAttribute>(inherit: true).ToList();
+            var classOutputs = hubType.GetCustomAttributes<McpToolOutputAttribute>(inherit: true).ToList();
             var classAuthorizeData = hubType.GetCustomAttributes(inherit: true).OfType<IAuthorizeData>().ToList();
             var classAllowsAnonymous = hubType.GetCustomAttributes(inherit: true).OfType<IAllowAnonymous>().Any();
             var hubName = TrimHubSuffix(hubType.Name);
@@ -173,6 +174,9 @@ namespace Nabu.Mcp.AspNetCore.SignalR.Discovery
                     continue;
                 }
 
+                var methodOutputs = method.GetCustomAttributes<McpToolOutputAttribute>(inherit: true).ToList();
+                var matchedOutputs = new HashSet<McpToolOutputAttribute>();
+
                 foreach (var variant in variants)
                 {
                     if (variant != null && !variant.Enabled)
@@ -188,12 +192,15 @@ namespace Nabu.Mcp.AspNetCore.SignalR.Discovery
                     var tool = CreateTool(
                         hubType, hubName, route, method, parameters,
                         useVariantIdentity ? variant : null,
-                        classAuthorizeData, classAllowsAnonymous, usedNames);
+                        classAuthorizeData, classAllowsAnonymous, usedNames,
+                        methodOutputs, classOutputs, matchedOutputs);
                     if (tool != null)
                     {
                         results.Add(tool);
                     }
                 }
+
+                McpToolOutputResolver.WarnUnmatched(methodOutputs, matchedOutputs, hubType.Name + "." + method.Name, _logger);
             }
 
             return results;
@@ -208,7 +215,10 @@ namespace Nabu.Mcp.AspNetCore.SignalR.Discovery
             McpToolAttribute? attribute,
             IReadOnlyList<IAuthorizeData> classAuthorizeData,
             bool classAllowsAnonymous,
-            ISet<string> usedNames)
+            ISet<string> usedNames,
+            IReadOnlyList<McpToolOutputAttribute> methodOutputs,
+            IReadOnlyList<McpToolOutputAttribute> classOutputs,
+            ISet<McpToolOutputAttribute> matchedOutputs)
         {
             var display = hubType.Name + "." + method.Name;
 
@@ -276,6 +286,13 @@ namespace Nabu.Mcp.AspNetCore.SignalR.Discovery
 
             name = ReserveName(McpToolRegistry.Sanitize(name!), usedNames, display);
 
+            McpToolOutputDescriptor? output;
+            if (!McpToolOutputResolver.TrySelect(
+                    methodOutputs, classOutputs, name, attribute?.Name, display, _logger, matchedOutputs, out output))
+            {
+                return null;
+            }
+
             var annotations = new McpToolAnnotations
             {
                 Title = attribute?.Title ?? McpToolRegistry.Humanize(method.Name),
@@ -293,6 +310,7 @@ namespace Nabu.Mcp.AspNetCore.SignalR.Discovery
                 InvokerType = typeof(SignalRHubToolInvoker),
                 Constants = constants,
                 Authorization = BuildAuthorization(method, classAuthorizeData, classAllowsAnonymous),
+                Output = output,
             };
 
             MetadataTable.Add(descriptor, new SignalRHubToolMetadata(

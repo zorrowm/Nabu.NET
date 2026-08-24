@@ -41,6 +41,7 @@ app.MapGet("/customers/{id}", (int id) => ...)
 - [Minimal APIs](#minimal-apis)
 - [SignalR hubs](#signalr-hubs)
 - [One action, several tools](#one-action-several-tools)
+- [Shaping tool output](#shaping-tool-output)
 - [How arguments are mapped](#how-arguments-are-mapped)
 - [File uploads](#file-uploads)
 - [Schema generation](#schema-generation)
@@ -173,9 +174,11 @@ curl -X POST http://localhost:5000/mcp \
 | `[McpTool]` | controller | Publishes every action on the controller. |
 | `[McpIgnore]` | controller, action, parameter, property | Excludes it. Always wins. |
 | `[McpParameter]` | parameter, property | Overrides the name, description, requiredness or example of one input. |
+| `[McpToolOutput]` | controller, action | Shapes what the tool returns: hides fields or transforms the response with a converter. Repeatable - see [Shaping tool output](#shaping-tool-output). |
 
-For Minimal APIs the same declarations are made with the `.McpTool()` / `.McpIgnore()` endpoint
-conventions (or the same attributes on the handler delegate) - see [Minimal APIs](#minimal-apis).
+For Minimal APIs the same declarations are made with the `.McpTool()` / `.McpIgnore()` /
+`.McpToolOutput()` endpoint conventions (or the same attributes on the handler delegate) - see
+[Minimal APIs](#minimal-apis).
 
 `[McpTool]` also accepts `Name`, `Title`, `Description`, `Enabled`, and the four MCP behaviour hints
 `ReadOnly`, `Destructive`, `Idempotent` and `OpenWorld`. The hints default to the HTTP semantics of the
@@ -401,6 +404,83 @@ Notes:
 - Give every extra variant an explicit `Name`. Variants without one fall back to the generated
   `controller_action` name and collide, and all but the first end up with a `_2`, `_3`, ... suffix.
 - Variants declared on an action replace a controller-wide `[McpTool]` rather than adding to it.
+
+## Shaping tool output
+
+An action's response is often wider than what a model should see: internal identifiers, owner
+fields, audit metadata, payloads sized for a UI rather than a context window. `[McpToolOutput]`
+shapes the JSON a tool returns *after* the pipeline has run - the HTTP API keeps its contract, and
+only MCP clients get the narrowed view.
+
+```csharp
+[HttpGet]
+[McpTool("todos_list")]
+[McpTool("todos_list_compact")]
+[McpToolOutput(Tool = "todos_list_compact",
+    IncludeFields = new[] { "items.id", "items.title", "totalCount" })]
+public ActionResult<TodoPage> List(...) => ...
+```
+
+| Property | Purpose |
+|---|---|
+| `IncludeFields` | Keeps only the listed field paths; every other property is removed. |
+| `ExcludeFields` | Removes the listed field paths. Applied after `IncludeFields`. |
+| `Converter` | An `IMcpToolOutputConverter` type that transforms the (already filtered) JSON. |
+| `Tool` | Scopes the occurrence to one tool of a multi-`[McpTool]` action. Unset applies to all of them. |
+
+Field paths are dot-separated JSON property names, matched case-insensitively, and arrays are
+traversed transparently: `items.owner` removes `owner` from every element of `items`. Both the text
+content and `structuredContent` are shaped. The attribute is repeatable, so each variant of an
+action can publish its own view of the same response; a method-level occurrence overrides a
+controller-level one, and within one level a `Tool`-scoped occurrence wins over an unscoped one.
+
+For transformations that field lists cannot express, name a converter:
+
+```csharp
+[McpTool("todos_get_summary")]
+[McpToolOutput(Tool = "todos_get_summary",
+    ExcludeFields = new[] { "attachments" },
+    Converter = typeof(TodoSummaryOutputConverter))]
+public ActionResult<TodoItem> GetById(Guid id) => ...
+
+public sealed class TodoSummaryOutputConverter : IMcpToolOutputConverter
+{
+    public JsonNode? Convert(McpToolOutputContext context, JsonNode? output)
+    {
+        var item = output!.AsObject();
+        return new JsonObject
+        {
+            ["id"] = item["id"]?.DeepClone(),
+            ["summary"] = item["title"]?.GetValue<string>(),
+        };
+    }
+}
+```
+
+Converters run after the field filters, are resolved from the request's services when registered -
+so they can take dependencies - and are constructed with `ActivatorUtilities` otherwise. Returning
+`null` exposes an empty result.
+
+Minimal APIs use the endpoint convention (or the same attribute on the handler delegate):
+
+```csharp
+app.MapGet("/customers/{id}", (int id) => ...)
+   .McpTool("customers_get")
+   .McpToolOutput(output => output.ExcludeFields = new[] { "ssn" });
+```
+
+Notes:
+
+- Shaping is **fail-closed**. When a successful response cannot be shaped - the body is not valid
+  JSON, or the converter throws - the tool answers an error instead of the raw body, so a filter
+  meant to hide data never leaks it by failing. A converter that names a type which is not a
+  concrete `IMcpToolOutputConverter` keeps the tool from being published at all.
+- Error responses (per `TreatErrorStatusAsToolError`) and empty bodies pass through unshaped: the
+  filters describe the success payload, not the framework's failure text.
+- Only JSON responses can be shaped; a shaped tool answering `text/plain` or XML reports an error.
+- A `Tool` name that matches nothing the action publishes is logged as a warning, exactly like a
+  misspelled parameter name.
+- SignalR hub methods support the same attribute - the shaping applies to the hub result JSON.
 
 ## How arguments are mapped
 
