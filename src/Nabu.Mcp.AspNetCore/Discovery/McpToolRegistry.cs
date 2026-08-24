@@ -167,6 +167,14 @@ namespace Nabu.Mcp.AspNetCore.Discovery
                     continue;
                 }
 
+#if !NETSTANDARD2_0
+                if (IsODataRouted(action))
+                {
+                    LogODataSkip(action);
+                    continue;
+                }
+#endif
+
                 List<McpToolDescriptor> tools;
                 try
                 {
@@ -202,6 +210,76 @@ namespace Nabu.Mcp.AspNetCore.Discovery
             results.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
             return results;
         }
+
+#if !NETSTANDARD2_0
+        private const string ODataRoutingMetadataInterface = "Microsoft.AspNetCore.OData.Routing.IODataRoutingMetadata";
+
+        private const string ODataToolSourceTypeName = "Nabu.Mcp.AspNetCore.OData.Discovery.ODataToolSource";
+
+        /// <summary>
+        /// OData-routed actions are excluded from HTTP discovery: their route templates carry OData
+        /// path syntax (<c>Products({key})</c>, <c>Default.Rate</c>, ...) and their query options and
+        /// body payloads have shapes this registry does not understand. The
+        /// <c>Nabu.Mcp.AspNetCore.OData</c> package contributes them through an
+        /// <see cref="IMcpToolSource"/> instead. Detection is by metadata type name so the core
+        /// package needs no OData reference.
+        /// </summary>
+        internal static bool IsODataRouted(ControllerActionDescriptor action)
+        {
+            var metadata = action.EndpointMetadata;
+            if (metadata == null)
+            {
+                return false;
+            }
+
+            foreach (var entry in metadata)
+            {
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                foreach (var contract in entry.GetType().GetInterfaces())
+                {
+                    if (string.Equals(contract.FullName, ODataRoutingMetadataInterface, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private void LogODataSkip(ControllerActionDescriptor action)
+        {
+            foreach (var source in _toolSources)
+            {
+                if (string.Equals(source.GetType().FullName, ODataToolSourceTypeName, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            var optedIn = action.MethodInfo.GetCustomAttribute<McpToolAttribute>(inherit: true) != null ||
+                          action.ControllerTypeInfo.GetCustomAttribute<McpToolAttribute>(inherit: true) != null;
+            if (optedIn)
+            {
+                _logger.LogWarning(
+                    "Nabu MCP did not publish the OData-routed action {Controller}.{Action}: OData endpoints are exposed by the " +
+                    "Nabu.Mcp.AspNetCore.OData package. Add it and call AddNabuMcpOData().",
+                    action.ControllerName,
+                    action.ActionName);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Nabu MCP left the OData-routed action {Controller}.{Action} to the Nabu.Mcp.AspNetCore.OData package.",
+                    action.ControllerName,
+                    action.ActionName);
+            }
+        }
+#endif
 
         /// <summary>
         /// Appends the tools contributed by registered <see cref="IMcpToolSource"/> implementations.
@@ -373,7 +451,7 @@ namespace Nabu.Mcp.AspNetCore.Discovery
         /// controller, and the action's filter descriptors - which is where globally registered
         /// authorization filters show up. As in MVC, an <c>[AllowAnonymous]</c> anywhere in that set wins.
         /// </remarks>
-        private static McpToolAuthorization ResolveAuthorization(ControllerActionDescriptor action)
+        internal static McpToolAuthorization ResolveAuthorization(ControllerActionDescriptor action)
         {
             var allowAnonymous = false;
             var authorizeData = new List<IAuthorizeData>();
@@ -433,15 +511,28 @@ namespace Nabu.Mcp.AspNetCore.Discovery
             }
         }
 
-        /// <summary>
-        /// Narrows the action's full input list down to the set one <see cref="McpToolAttribute"/> asks for.
-        /// Returns <c>false</c> when the variant cannot produce a callable tool.
-        /// </summary>
         private bool TryApplyVariant(
             string display,
             McpToolAttribute? attribute,
             string routeTemplate,
             IReadOnlyList<McpToolParameterDescriptor> allParameters,
+            out List<McpToolParameterDescriptor> parameters,
+            out List<McpToolConstantDescriptor> constants)
+        {
+            return TryApplyVariant(display, attribute, routeTemplate, allParameters, _logger, out parameters, out constants);
+        }
+
+        /// <summary>
+        /// Narrows the action's full input list down to the set one <see cref="McpToolAttribute"/> asks for.
+        /// Returns <c>false</c> when the variant cannot produce a callable tool. Shared with the
+        /// extension packages' tool sources so include/exclude/constant semantics stay identical.
+        /// </summary>
+        internal static bool TryApplyVariant(
+            string display,
+            McpToolAttribute? attribute,
+            string routeTemplate,
+            IReadOnlyList<McpToolParameterDescriptor> allParameters,
+            ILogger logger,
             out List<McpToolParameterDescriptor> parameters,
             out List<McpToolConstantDescriptor> constants)
         {
@@ -458,9 +549,9 @@ namespace Nabu.Mcp.AspNetCore.Discovery
             var exclude = BuildNameSet(attribute.ExcludeParameters);
             var required = BuildNameSet(attribute.RequiredParameters);
             var optional = BuildNameSet(attribute.OptionalParameters);
-            var pinned = BuildConstantMap(attribute, display);
+            var pinned = BuildConstantMap(attribute, display, logger);
 
-            WarnAboutUnknownNames(display, allParameters, include, exclude, required, optional, pinned?.Keys);
+            WarnAboutUnknownNames(display, logger, allParameters, include, exclude, required, optional, pinned?.Keys);
 
             foreach (var parameter in allParameters)
             {
@@ -475,7 +566,7 @@ namespace Nabu.Mcp.AspNetCore.Discovery
                     var value = McpConstantValue.Convert(constantText!, parameter.ParameterType);
                     if (value == null && isRequiredRouteToken)
                     {
-                        _logger.LogWarning(
+                        logger.LogWarning(
                             "Nabu MCP skipped a [McpTool] variant on {Endpoint}: route parameter '{Parameter}' " +
                             "was pinned to an empty value but '{Template}' cannot be built without it.",
                             display,
@@ -504,7 +595,7 @@ namespace Nabu.Mcp.AspNetCore.Discovery
                 {
                     if (isRequiredRouteToken)
                     {
-                        _logger.LogWarning(
+                        logger.LogWarning(
                             "Nabu MCP skipped a [McpTool] variant on {Endpoint}: route parameter '{Parameter}' " +
                             "was hidden but '{Template}' cannot be built without it. Pin it with ConstantParameters instead.",
                             display,
@@ -566,7 +657,7 @@ namespace Nabu.Mcp.AspNetCore.Discovery
             return set.Count == 0 ? null : set;
         }
 
-        private IDictionary<string, string>? BuildConstantMap(McpToolAttribute attribute, string display)
+        private static IDictionary<string, string>? BuildConstantMap(McpToolAttribute attribute, string display, ILogger logger)
         {
             var entries = attribute.ConstantParameters;
             if (entries == null || entries.Length == 0)
@@ -581,7 +672,7 @@ namespace Nabu.Mcp.AspNetCore.Discovery
                 string value;
                 if (!McpConstantValue.TrySplit(entry, out name, out value))
                 {
-                    _logger.LogWarning(
+                    logger.LogWarning(
                         "Nabu MCP ignored the ConstantParameters entry '{Entry}' on {Endpoint}: expected 'name=value'.",
                         entry,
                         display);
@@ -618,8 +709,9 @@ namespace Nabu.Mcp.AspNetCore.Discovery
         /// A misspelled parameter name would otherwise fail silently - the variant would simply expose
         /// the full parameter set - so every configured name that matches nothing is reported.
         /// </summary>
-        private void WarnAboutUnknownNames(
+        private static void WarnAboutUnknownNames(
             string display,
+            ILogger logger,
             IReadOnlyList<McpToolParameterDescriptor> allParameters,
             params IEnumerable<string>?[] configuredNames)
         {
@@ -641,7 +733,7 @@ namespace Nabu.Mcp.AspNetCore.Discovery
                 {
                     if (!known.Contains(name))
                     {
-                        _logger.LogWarning(
+                        logger.LogWarning(
                             "Nabu MCP ignored '{Name}' in an [McpTool] variant on {Endpoint}: the endpoint has no such input.",
                             name,
                             display);
@@ -747,7 +839,7 @@ namespace Nabu.Mcp.AspNetCore.Discovery
             return "Invokes " + httpMethod + " /" + routeTemplate + " on the " + action.ControllerName + " API.";
         }
 
-        private static McpToolAnnotations BuildAnnotations(
+        internal static McpToolAnnotations BuildAnnotations(
             McpToolAttribute? attribute,
             McpToolAttribute? methodAttribute,
             string httpMethod,

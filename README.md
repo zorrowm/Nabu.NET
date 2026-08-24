@@ -40,6 +40,7 @@ app.MapGet("/customers/{id}", (int id) => ...)
 - [Attributes](#attributes)
 - [Minimal APIs](#minimal-apis)
 - [SignalR hubs](#signalr-hubs)
+- [OData endpoints](#odata-endpoints)
 - [One action, several tools](#one-action-several-tools)
 - [Shaping tool output](#shaping-tool-output)
 - [How arguments are mapped](#how-arguments-are-mapped)
@@ -339,6 +340,82 @@ requires a signed-in caller, `chat_delete_message` appears only for an administr
 hub demonstrates the class-level gate - plus a browser client at `/` that receives the
 broadcasts a tool call triggers, live.
 
+## OData endpoints
+
+The `Nabu.Mcp.AspNetCore.OData` extension package publishes OData endpoints
+([Microsoft.AspNetCore.OData](https://www.nuget.org/packages/Microsoft.AspNetCore.OData) 8/9) the
+same way - same `[McpTool]` / `[McpIgnore]` / `[McpParameter]` / `[McpToolOutput]` attributes, same
+naming, same XML-doc descriptions, same authorization-aware visibility - into the same `/mcp`
+catalogue as the HTTP tools, on both protocol layers:
+
+```csharp
+builder.Services.AddControllers().AddOData(options => options
+    .EnableQueryFeatures()
+    .AddRouteComponents("odata", edmModel));
+
+builder.Services.AddNabuMcp(options => { ... })
+                .AddNabuMcpOData();
+
+app.UseNabuMcp();
+app.MapControllers();
+```
+
+```csharp
+public class ProductsController : ODataController
+{
+    /// <summary>Queries the product catalogue.</summary>
+    [EnableQuery]
+    [McpTool]
+    public IQueryable<Product> Get() => ...
+}
+```
+
+The philosophy is the same as everywhere else: **the tool call runs through the real thing.** An
+OData tool is invoked as a synthetic HTTP request through the application's own pipeline - routing,
+authentication, authorization, `[EnableQuery]` validation and the OData formatters all behave
+exactly as they do for a real `/odata/Products` request. On top of that, the source understands the
+OData shapes the core registry does not:
+
+- **Query options become tool inputs.** A queryable GET action - one marked `[EnableQuery]` or
+  taking an `ODataQueryOptions` parameter - advertises `filter`, `select`, `orderby`, `expand`,
+  `top`, `skip` and `count` as optional arguments, mapped onto the `$`-prefixed query string keys.
+  The advertised set honours the action's own `EnableQueryAttribute.AllowedQueryOptions`, and
+  `[EnableQuery]`'s server-side validation still runs on every call.
+- **One operation, one tool.** The OData conventions register the same action under several
+  templates (`Products({key})` and `Products/{key}`, `Default.Rate` and `Rate`, a `$count`
+  projection). The source collapses them and prefers the key-as-segment, unqualified template.
+- **String keys and function parameters are quoted.** A parenthesis-style template with a string
+  parameter renders with the OData literal quotes: `Customers('{key}')`.
+- **Request bodies speak EDM.** Entity payloads are advertised with the property names the OData
+  deserializer actually matches (`Name`, not `name` - unless the model enables lower camel case),
+  a `Delta<T>` parameter becomes an all-optional partial payload for PATCH, and an
+  `ODataActionParameters` parameter becomes the action's named-parameters JSON object.
+- **The infrastructure stays hidden.** The `$metadata` and service document endpoints are never
+  published, and `ODataQueryOptions` / `ODataPath` parameters never appear in a schema.
+
+`[Authorize]` attributes are read for authorization-aware `tools/list` visibility exactly as for
+controllers, and enforced for real by the pipeline on every call. `[McpToolOutput]` shapes OData
+payloads like any other response - `ExcludeFields = new[] { "value.CostPrice" }` prunes a property
+from every entity of a collection result, since field paths traverse arrays transparently.
+
+Options on `AddNabuMcpOData(options => ...)`:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `ExposeAllODataActions` | `false` | Publish every OData-routed action, not just annotated ones. `[McpIgnore]` still wins. |
+| `QueryOptions` | filter, select, orderby, expand, top, skip, count | Which OData query options queryable actions advertise. `search`, `apply` and `compute` are off by default because they need extra server-side wiring. |
+
+Current limits: the package targets net8.0+ like the other extension packages, bound operations
+follow the usual OData requirement of an explicit `[HttpGet]` / `[HttpPost]` on the method, and a
+string key routed through a parenthesis-only template (`EnableKeyAsSegment` disabled) must not
+contain a single quote - keep key-as-segment routing on (the default) for such keys.
+
+`samples/Nabu.Sample.ODataApi` is a complete runnable example: a JWT-secured product catalogue
+whose entity set, bound action (`Rate`) and bound function (`MostExpensive`) are MCP tools with
+per-caller visibility - querying is anonymous, `products_create` and `products_update` require a
+signed-in caller, `products_delete` appears only for an administrator - and `[McpToolOutput]`
+keeps the internal purchase price out of every tool result.
+
 ## One action, several tools
 
 A single endpoint is often the wrong shape for a model. `GET /api/todos` with five optional filters is
@@ -481,6 +558,8 @@ Notes:
 - A `Tool` name that matches nothing the action publishes is logged as a warning, exactly like a
   misspelled parameter name.
 - SignalR hub methods support the same attribute - the shaping applies to the hub result JSON.
+- OData actions support it too - field paths traverse the collection envelope, so
+  `ExcludeFields = new[] { "value.Secret" }` prunes `Secret` from every returned entity.
 
 ## How arguments are mapped
 
@@ -838,11 +917,14 @@ Newtonsoft.Json.
 src/Nabu.Mcp.AspNetCore/            the framework
 src/Nabu.Mcp.ModelContextProtocol/  optional adapter serving Nabu's tools through the official MCP C# SDK
 src/Nabu.Mcp.AspNetCore.SignalR/    optional extension publishing SignalR hub methods as tools
+src/Nabu.Mcp.AspNetCore.OData/      optional extension publishing OData endpoints as tools
 samples/Nabu.Sample.TodoApi/        a JWT-secured todo API wired up with Nabu
 samples/Nabu.Sample.OfficialSdk/    a book catalog served through UseOfficialMcpProtocol()
 samples/Nabu.Sample.ChatHub/        a SignalR chat room published over MCP, with a live browser client
+samples/Nabu.Sample.ODataApi/       a JWT-secured OData product catalogue published over MCP
 tests/Nabu.Mcp.AspNetCore.Tests/          unit and integration tests for the core package
 tests/Nabu.Mcp.AspNetCore.SignalR.Tests/  unit and integration tests for the SignalR extension
+tests/Nabu.Mcp.AspNetCore.OData.Tests/    unit and integration tests for the OData extension
 .github/workflows/           CI on every push and PR, NuGet publishing on every v* tag
 ```
 
@@ -907,7 +989,7 @@ The demo tokens live for 24 hours; `docker compose up` again regenerates them.
 
 ```bash
 dotnet build          # netstandard2.0 + net8.0 + net10.0
-dotnet test           # 312 tests
+dotnet test           # 366 tests
 ```
 
 The suite covers route template parsing, tool naming, JSON schema generation, argument binding,
@@ -917,7 +999,10 @@ never returns another user's data, that an admin-only action stays admin-only wh
 and that a caller is advertised the tools its own credentials reach and no others. The SignalR suite
 asserts the same claims for hub tools - method-level policies enforced by the real dispatcher, the
 class-level gate, caller-message capture, streaming caps - and that a broadcast triggered over MCP
-reaches a really connected SignalR client.
+reaches a really connected SignalR client. The OData suite drives the product catalogue sample the
+same way: `$filter`/`$select`/`$top` arguments applied by the real `[EnableQuery]`, EDM-named
+bodies read by the real OData formatter, role requirements enforced by the pipeline, and
+`[McpToolOutput]` pruning fields from OData payloads.
 
 Every push to `main` and every pull request runs the same build, test and pack on GitHub Actions
 (`.github/workflows/ci.yml`).
