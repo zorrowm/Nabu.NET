@@ -199,6 +199,9 @@ namespace Nabu.Mcp.AspNetCore.Discovery
             var fallbackTitle = httpMethod + " /" + routeTemplate;
             var results = new List<McpToolDescriptor>(variants.Count);
 
+            var outputs = new List<McpToolOutputAttribute>(metadata.GetOrderedMetadata<McpToolOutputAttribute>());
+            var matchedOutputs = new HashSet<McpToolOutputAttribute>();
+
             foreach (var attribute in variants)
             {
                 if (attribute != null && !attribute.Enabled)
@@ -220,14 +223,24 @@ namespace Nabu.Mcp.AspNetCore.Discovery
                 var inputSchema = BuildInputSchema(parameters);
                 var annotations = BuildAnnotations(attribute, attribute, httpMethod, fallbackTitle);
 
+                McpToolOutputDescriptor? output;
+                if (!McpToolOutputResolver.TrySelect(
+                        outputs, McpToolOutputResolver.None, name, attribute?.Name, display, _logger, matchedOutputs, out output))
+                {
+                    continue;
+                }
+
                 results.Add(new McpToolDescriptor(name, httpMethod, routeTemplate, parameters, inputSchema, annotations)
                 {
                     Description = ResolveEndpointDescription(attribute, method, httpMethod, routeTemplate),
                     Constants = constants,
                     Authorization = authorization,
                     Endpoint = endpoint,
+                    Output = output,
                 });
             }
+
+            McpToolOutputResolver.WarnUnmatched(outputs, matchedOutputs, display, _logger);
 
             return results;
         }

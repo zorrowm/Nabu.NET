@@ -56,8 +56,8 @@
 <main>
   <article class="doc">
     <h1>Attributes &amp; tools</h1>
-    <p class="lede">Four attributes cover the whole surface: publish, exclude, and shape individual inputs —
-    plus the ability to publish one action as several differently shaped tools.</p>
+    <p class="lede">A handful of attributes cover the whole surface: publish, exclude, shape individual inputs,
+    and shape what a tool returns — plus the ability to publish one action as several differently shaped tools.</p>
 
     <h2 id="attributes">The attribute surface</h2>
     <table>
@@ -67,12 +67,13 @@
         <tr><td><code>[McpTool]</code></td><td>controller</td><td>Publishes every action on the controller.</td></tr>
         <tr><td><code>[McpIgnore]</code></td><td>controller, action, parameter, property</td><td>Excludes it. Always wins.</td></tr>
         <tr><td><code>[McpParameter]</code></td><td>parameter, property</td><td>Overrides the name, description, requiredness or example of one input.</td></tr>
+        <tr><td><code>[McpToolOutput]</code></td><td>controller, action</td><td>Shapes what the tool returns: hides fields or transforms the response with a converter. Repeatable — see <a href="#shaping-tool-output">Shaping tool output</a>.</td></tr>
       </tbody>
     </table>
     <p>
       For Minimal APIs the same declarations are made with the <code>.McpTool()</code> /
-      <code>.McpIgnore()</code> endpoint conventions (or the same attributes on the handler delegate) —
-      see <a href="minimal-apis.html">Minimal APIs</a>.
+      <code>.McpIgnore()</code> / <code>.McpToolOutput()</code> endpoint conventions (or the same
+      attributes on the handler delegate) — see <a href="minimal-apis.html">Minimal APIs</a>.
     </p>
     <p>
       <code>[McpTool]</code> also accepts <code>Name</code>, <code>Title</code>, <code>Description</code>,
@@ -153,6 +154,75 @@ public ActionResult&lt;IEnumerable&lt;Forecast&gt;&gt; GetForecast(string city, 
         <code>_2</code>, <code>_3</code>, ... suffix.</li>
       <li>Variants declared on an action replace a controller-wide <code>[McpTool]</code> rather than
         adding to it.</li>
+    </ul>
+
+    <h2 id="shaping-tool-output">Shaping tool output</h2>
+    <p>
+      An action's response is often wider than what a model should see: internal identifiers, owner
+      fields, audit metadata, payloads sized for a UI rather than a context window.
+      <code>[McpToolOutput]</code> shapes the JSON a tool returns <em>after</em> the pipeline has run —
+      the HTTP API keeps its contract, and only MCP clients get the narrowed view.
+    </p>
+    <pre><code>[HttpGet]
+[McpTool("todos_list")]
+[McpTool("todos_list_compact")]
+[McpToolOutput(Tool = "todos_list_compact",
+    IncludeFields = new[] { "items.id", "items.title", "totalCount" })]
+public ActionResult&lt;TodoPage&gt; List(...) =&gt; ...</code></pre>
+    <table>
+      <thead><tr><th>Property</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>IncludeFields</code></td><td>Keeps only the listed field paths; every other property is removed.</td></tr>
+        <tr><td><code>ExcludeFields</code></td><td>Removes the listed field paths. Applied after <code>IncludeFields</code>.</td></tr>
+        <tr><td><code>Converter</code></td><td>An <code>IMcpToolOutputConverter</code> type that transforms the (already filtered) JSON.</td></tr>
+        <tr><td><code>Tool</code></td><td>Scopes the occurrence to one tool of a multi-<code>[McpTool]</code> action. Unset applies to all of them.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Field paths are dot-separated JSON property names, matched case-insensitively, and arrays are
+      traversed transparently: <code>items.owner</code> removes <code>owner</code> from every element of
+      <code>items</code>. Both the text content and <code>structuredContent</code> are shaped. The
+      attribute is repeatable, so each variant of an action can publish its own view of the same
+      response; a method-level occurrence overrides a controller-level one, and within one level a
+      <code>Tool</code>-scoped occurrence wins over an unscoped one.
+    </p>
+    <p>For transformations that field lists cannot express, name a converter:</p>
+    <pre><code>[McpTool("todos_get_summary")]
+[McpToolOutput(Tool = "todos_get_summary",
+    ExcludeFields = new[] { "attachments" },
+    Converter = typeof(TodoSummaryOutputConverter))]
+public ActionResult&lt;TodoItem&gt; GetById(Guid id) =&gt; ...
+
+public sealed class TodoSummaryOutputConverter : IMcpToolOutputConverter
+{
+    public JsonNode? Convert(McpToolOutputContext context, JsonNode? output)
+    {
+        var item = output!.AsObject();
+        return new JsonObject
+        {
+            ["id"] = item["id"]?.DeepClone(),
+            ["summary"] = item["title"]?.GetValue&lt;string&gt;(),
+        };
+    }
+}</code></pre>
+    <p>
+      Converters run after the field filters, are resolved from the request's services when registered —
+      so they can take dependencies — and are constructed with <code>ActivatorUtilities</code> otherwise.
+      Returning <code>null</code> exposes an empty result.
+    </p>
+    <h3 id="output-shaping-notes">Notes</h3>
+    <ul>
+      <li>Shaping is <strong>fail-closed</strong>. When a successful response cannot be shaped — the body
+        is not valid JSON, or the converter throws — the tool answers an error instead of the raw body,
+        so a filter meant to hide data never leaks it by failing. A converter that names a type which is
+        not a concrete <code>IMcpToolOutputConverter</code> keeps the tool from being published at all.</li>
+      <li>Error responses (per <code>TreatErrorStatusAsToolError</code>) and empty bodies pass through
+        unshaped: the filters describe the success payload, not the framework's failure text.</li>
+      <li>Only JSON responses can be shaped; a shaped tool answering <code>text/plain</code> or XML
+        reports an error.</li>
+      <li>A <code>Tool</code> name that matches nothing the action publishes is logged as a warning,
+        exactly like a misspelled parameter name.</li>
+      <li>SignalR hub methods support the same attribute — the shaping applies to the hub result JSON.</li>
     </ul>
 
     <h2 id="argument-mapping">How arguments are mapped</h2>

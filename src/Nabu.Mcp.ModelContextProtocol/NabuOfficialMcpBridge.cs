@@ -110,7 +110,7 @@ namespace Nabu.Mcp.ModelContextProtocol
                 return Deserialize<CallToolResult>(NabuRequestHandler.ToolError("The tool failed to execute: " + ex.Message));
             }
 
-            return Deserialize<CallToolResult>(_handler.BuildToolResult(tool!, invocation));
+            return Deserialize<CallToolResult>(_handler.BuildToolResult(tool!, invocation, httpContext));
         }
 
         private HttpContext RequireHttpContext()

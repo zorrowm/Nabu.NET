@@ -116,7 +116,16 @@ app.MapGet("/api/time/{timeZone}", ([AsParameters] TimeInZoneQuery query) =>
         return Results.BadRequest(new { message = "Invalid format string '" + query.Format + "'." });
     }
 })
-.McpTool("server_time_in_zone", "Reports the server's current time in a named time zone.");
+.McpTool("server_time_in_zone", "Reports the server's current time in a named time zone.")
+
+// Output shaping works for Minimal APIs too: this second variant answers the same handler's
+// response without the utcOffset field. Scoping with Tool leaves server_time_in_zone untouched.
+.McpTool("server_time_in_zone_brief", "Reports the server's current time in a named time zone, without the UTC offset.")
+.McpToolOutput(output =>
+{
+    output.Tool = "server_time_in_zone_brief";
+    output.ExcludeFields = new[] { "utcOffset" };
+});
 
 app.Run();
 

@@ -56,6 +56,13 @@ namespace Nabu.Sample.TodoApi.Controllers
         [HttpGet]
         [McpTool]
         [McpTool(
+            "todos_list_compact",
+            Title = "List todos (compact)",
+            Description = "Lists the signed-in user's todo items with only their identifying fields.")]
+        [McpToolOutput(
+            Tool = "todos_list_compact",
+            IncludeFields = new[] { "items.id", "items.title", "items.isCompleted", "totalCount" })]
+        [McpTool(
             "todos_list_open",
             Title = "List open todos",
             Description = "Lists the todo items that are still open. Completed items are never returned.",
@@ -90,6 +97,14 @@ namespace Nabu.Sample.TodoApi.Controllers
         /// <param name="id">Identifier of the item.</param>
         [HttpGet("{id:guid}")]
         [McpTool]
+        [McpTool(
+            "todos_get_summary",
+            Title = "Summarize a todo",
+            Description = "Returns a one-line summary of a todo item instead of the full record.")]
+        [McpToolOutput(
+            Tool = "todos_get_summary",
+            ExcludeFields = new[] { "attachments" },
+            Converter = typeof(TodoSummaryOutputConverter))]
         public ActionResult<TodoItem> GetById(Guid id)
         {
             var item = _repository.Find(Owner, id);
