@@ -53,6 +53,8 @@
     <InternalsVisibleTo Include="Nabu.Mcp.ModelContextProtocol" />
     <InternalsVisibleTo Include="Nabu.Mcp.AspNetCore.SignalR" />
     <InternalsVisibleTo Include="Nabu.Mcp.AspNetCore.SignalR.Tests" />
+    <InternalsVisibleTo Include="Nabu.Mcp.AspNetCore.OData" />
+    <InternalsVisibleTo Include="Nabu.Mcp.AspNetCore.OData.Tests" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">

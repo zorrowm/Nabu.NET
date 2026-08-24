@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      net8.0+ only: Microsoft.AspNetCore.OData 9.x targets .NET 8, and the tool source reads the
+      OData routing metadata that package stamps onto the endpoint table. There is no
+      netstandard2.0 story here - apps on ASP.NET Core 2.x keep exposing their HTTP endpoints
+      through the core package.
+    -->
+    <TargetFrameworks>net10.0;net8.0</TargetFrameworks>
+    <RootNamespace>Nabu.Mcp.AspNetCore.OData</RootNamespace>
+    <AssemblyName>Nabu.Mcp.AspNetCore.OData</AssemblyName>
+    <PackageId>Nabu.Mcp.AspNetCore.OData</PackageId>
+    <Title>Nabu.NET - MCP tools for OData endpoints</Title>
+    <Description>
+      Expose ASP.NET Core OData (Microsoft.AspNetCore.OData 8/9) endpoints as Model Context
+      Protocol (MCP) tools with the same [McpTool] attribute the core package uses for controllers.
+      Tool calls are replayed through the application's own HTTP pipeline - authentication,
+      authorization, [EnableQuery] and the OData formatters all keep working - and queryable
+      actions additionally advertise $filter, $select, $orderby, $top, $skip, $count and friends
+      as tool inputs.
+    </Description>
+    <PackageTags>mcp;model-context-protocol;aspnetcore;odata;ai;llm;tools</PackageTags>
+    <PackageProjectUrl>https://nabu.aghajanyan.me</PackageProjectUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.AspNetCore.OData" Version="9.5.0" />
+    <ProjectReference Include="..\Nabu.Mcp.AspNetCore\Nabu.Mcp.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nabu.Mcp.AspNetCore.OData.Tests" />
+  </ItemGroup>
+
+</Project>

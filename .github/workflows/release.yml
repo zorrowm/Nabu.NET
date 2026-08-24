@@ -98,7 +98,8 @@ jobs:
           for project in \
             src/Nabu.Mcp.AspNetCore/Nabu.Mcp.AspNetCore.csproj \
             src/Nabu.Mcp.ModelContextProtocol/Nabu.Mcp.ModelContextProtocol.csproj \
-            src/Nabu.Mcp.AspNetCore.SignalR/Nabu.Mcp.AspNetCore.SignalR.csproj
+            src/Nabu.Mcp.AspNetCore.SignalR/Nabu.Mcp.AspNetCore.SignalR.csproj \
+            src/Nabu.Mcp.AspNetCore.OData/Nabu.Mcp.AspNetCore.OData.csproj
           do
             dotnet pack "${project}" \
               --configuration Release \
