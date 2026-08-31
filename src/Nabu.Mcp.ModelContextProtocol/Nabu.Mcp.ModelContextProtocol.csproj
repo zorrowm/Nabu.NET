@@ -28,7 +28,7 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.1.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <ProjectReference Include="..\Nabu.Mcp.AspNetCore\Nabu.Mcp.AspNetCore.csproj" />
   </ItemGroup>
 
